@@ -56,6 +56,7 @@ save_pending = False
 video_mode = False
 
 current_keys = set()
+meet_camera_click_ratio = None
 
 # Schedule (global – shared between TUI, scheduler, and input handler)
 schedule_off_times = []
@@ -213,6 +214,7 @@ class TUI:
                 hotkeys = [
                     ("Ctrl+F10", "Pause/Resume Loop"),
                     ("Ctrl+F11", "Toggle Meet Camera"),
+                    ("Ctrl+Shift+F11", "Calibrate Meet Click"),
                     ("Ctrl+F12", "Set Schedule"),
                     ("Ctrl+C", "Exit"),
                 ]
@@ -222,6 +224,7 @@ class TUI:
                     ("Ctrl+F9", "Record (max 10s)"),
                     ("Ctrl+F10", "Play/Stop Loop"),
                     ("Ctrl+F11", "Toggle Meet Camera"),
+                    ("Ctrl+Shift+F11", "Calibrate Meet Click"),
                     ("Ctrl+F12", "Set Schedule"),
                     ("Ctrl+C", "Exit"),
                 ]
@@ -502,11 +505,15 @@ def _click_meet_camera_button(hwnd):
     cursor = wintypes.POINT()
     _user32.GetCursorPos(ctypes.byref(cursor))
 
-    # Google Meet's pre-join camera button is usually the left button in the
-    # bottom-center control cluster. Compute it from the current window bounds
-    # so moving the browser window does not break the click target.
-    x = rect.left + width // 2 - 48
-    y = rect.top + int(height * 0.82)
+    if meet_camera_click_ratio:
+        rx, ry = meet_camera_click_ratio
+        x = rect.left + int(width * rx)
+        y = rect.top + int(height * ry)
+    else:
+        # Google Meet's pre-join camera button is usually in the bottom-center
+        # control cluster. This default can be calibrated with Ctrl+F11.
+        x = rect.left + width // 2 - 48
+        y = rect.top + int(height * 0.82)
 
     _user32.SetCursorPos(x, y)
     _user32.mouse_event(_MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
@@ -515,6 +522,39 @@ def _click_meet_camera_button(hwnd):
     _user32.SetCursorPos(cursor.x, cursor.y)
     time.sleep(0.1)
     return True
+
+
+def calibrate_meet_camera_button():
+    global meet_camera_click_ratio
+
+    hwnd = _find_meet_hwnd()
+    if not hwnd:
+        ui_log("Meet window not found in Edge (ensure Meet is the active tab)")
+        return
+
+    rect = wintypes.RECT()
+    cursor = wintypes.POINT()
+    if not _user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        ui_log("Could not read Meet window bounds")
+        return
+    if not _user32.GetCursorPos(ctypes.byref(cursor)):
+        ui_log("Could not read cursor position")
+        return
+
+    width = rect.right - rect.left
+    height = rect.bottom - rect.top
+    if width <= 0 or height <= 0:
+        ui_log("Invalid Meet window bounds")
+        return
+
+    rx = (cursor.x - rect.left) / width
+    ry = (cursor.y - rect.top) / height
+    if not (0 <= rx <= 1 and 0 <= ry <= 1):
+        ui_log("Place cursor over the Meet camera button, inside the Meet window")
+        return
+
+    meet_camera_click_ratio = (rx, ry)
+    ui_log(f"Meet camera click calibrated ({rx:.3f}, {ry:.3f})")
 
 
 def toggle_meet_camera(from_hotkey=True):
@@ -600,6 +640,9 @@ def on_press(key):
         ctrl_pressed = (keyboard.Key.ctrl in current_keys or
                         keyboard.Key.ctrl_l in current_keys or
                         keyboard.Key.ctrl_r in current_keys)
+        shift_pressed = (keyboard.Key.shift in current_keys or
+                         keyboard.Key.shift_l in current_keys or
+                         keyboard.Key.shift_r in current_keys)
 
         if ctrl_pressed and keyboard.Key.f8 in current_keys:
             if video_mode:
@@ -641,7 +684,10 @@ def on_press(key):
             return
 
         if ctrl_pressed and keyboard.Key.f11 in current_keys:
-            threading.Thread(target=toggle_meet_camera, daemon=True).start()
+            if shift_pressed:
+                calibrate_meet_camera_button()
+            else:
+                threading.Thread(target=toggle_meet_camera, daemon=True).start()
             return
 
         if ctrl_pressed and keyboard.Key.f12 in current_keys:
