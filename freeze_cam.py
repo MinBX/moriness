@@ -448,7 +448,10 @@ _KEYEVENTF_KEYUP = 0x0002
 _VK_MENU = 0x12
 _VK_CONTROL = 0x11
 _VK_E = 0x45
+_VK_ESCAPE = 0x1B
 _SW_RESTORE = 9
+_MOUSEEVENTF_LEFTDOWN = 0x0002
+_MOUSEEVENTF_LEFTUP = 0x0004
 _meet_lock = threading.Lock()
 
 
@@ -469,6 +472,40 @@ def _find_meet_hwnd():
     return found[0] if found else None
 
 
+def _tap_key(vk):
+    _user32.keybd_event(vk, 0, 0, 0)
+    time.sleep(0.03)
+    _user32.keybd_event(vk, 0, _KEYEVENTF_KEYUP, 0)
+
+
+def _focus_meet_page(hwnd):
+    if _user32.IsIconic(hwnd):
+        _user32.ShowWindow(hwnd, _SW_RESTORE)
+        time.sleep(0.1)
+
+    _user32.keybd_event(_VK_MENU, 0, 0, 0)
+    _user32.SetForegroundWindow(hwnd)
+    _user32.keybd_event(_VK_MENU, 0, _KEYEVENTF_KEYUP, 0)
+    time.sleep(0.15)
+
+    # If Edge/Chrome has the address/search box focused, Escape returns focus
+    # to the page before sending Meet's camera shortcut.
+    _tap_key(_VK_ESCAPE)
+
+    rect = wintypes.RECT()
+    if _user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        cursor = wintypes.POINT()
+        _user32.GetCursorPos(ctypes.byref(cursor))
+        x = rect.left + (rect.right - rect.left) // 2
+        y = rect.top + (rect.bottom - rect.top) // 2
+        _user32.SetCursorPos(x, y)
+        _user32.mouse_event(_MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        time.sleep(0.03)
+        _user32.mouse_event(_MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        _user32.SetCursorPos(cursor.x, cursor.y)
+        time.sleep(0.1)
+
+
 def toggle_meet_camera(from_hotkey=True):
     if from_hotkey:
         time.sleep(0.3)
@@ -480,15 +517,7 @@ def toggle_meet_camera(from_hotkey=True):
             return
 
         prev = _user32.GetForegroundWindow()
-
-        if _user32.IsIconic(hwnd):
-            _user32.ShowWindow(hwnd, _SW_RESTORE)
-            time.sleep(0.1)
-
-        _user32.keybd_event(_VK_MENU, 0, 0, 0)
-        _user32.SetForegroundWindow(hwnd)
-        _user32.keybd_event(_VK_MENU, 0, _KEYEVENTF_KEYUP, 0)
-        time.sleep(0.2)
+        _focus_meet_page(hwnd)
 
         _user32.keybd_event(_VK_CONTROL, 0, 0, 0)
         _user32.keybd_event(_VK_E, 0, 0, 0)
