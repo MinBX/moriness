@@ -446,8 +446,6 @@ def load_video_file(path):
 _user32 = ctypes.windll.user32
 _KEYEVENTF_KEYUP = 0x0002
 _VK_MENU = 0x12
-_VK_CONTROL = 0x11
-_VK_E = 0x45
 _VK_ESCAPE = 0x1B
 _SW_RESTORE = 9
 _MOUSEEVENTF_LEFTDOWN = 0x0002
@@ -489,21 +487,34 @@ def _focus_meet_page(hwnd):
     time.sleep(0.15)
 
     # If Edge/Chrome has the address/search box focused, Escape returns focus
-    # to the page before sending Meet's camera shortcut.
+    # to the page before clicking Meet's camera control.
     _tap_key(_VK_ESCAPE)
 
+
+def _click_meet_camera_button(hwnd):
     rect = wintypes.RECT()
-    if _user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-        cursor = wintypes.POINT()
-        _user32.GetCursorPos(ctypes.byref(cursor))
-        x = rect.left + (rect.right - rect.left) // 2
-        y = rect.top + (rect.bottom - rect.top) // 2
-        _user32.SetCursorPos(x, y)
-        _user32.mouse_event(_MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-        time.sleep(0.03)
-        _user32.mouse_event(_MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-        _user32.SetCursorPos(cursor.x, cursor.y)
-        time.sleep(0.1)
+    if not _user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        ui_log("Could not read Meet window bounds")
+        return False
+
+    width = rect.right - rect.left
+    height = rect.bottom - rect.top
+    cursor = wintypes.POINT()
+    _user32.GetCursorPos(ctypes.byref(cursor))
+
+    # Google Meet's pre-join camera button is usually the left button in the
+    # bottom-center control cluster. Compute it from the current window bounds
+    # so moving the browser window does not break the click target.
+    x = rect.left + width // 2 - 48
+    y = rect.top + int(height * 0.82)
+
+    _user32.SetCursorPos(x, y)
+    _user32.mouse_event(_MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+    time.sleep(0.03)
+    _user32.mouse_event(_MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+    _user32.SetCursorPos(cursor.x, cursor.y)
+    time.sleep(0.1)
+    return True
 
 
 def toggle_meet_camera(from_hotkey=True):
@@ -519,11 +530,8 @@ def toggle_meet_camera(from_hotkey=True):
         prev = _user32.GetForegroundWindow()
         _focus_meet_page(hwnd)
 
-        _user32.keybd_event(_VK_CONTROL, 0, 0, 0)
-        _user32.keybd_event(_VK_E, 0, 0, 0)
-        time.sleep(0.05)
-        _user32.keybd_event(_VK_E, 0, _KEYEVENTF_KEYUP, 0)
-        _user32.keybd_event(_VK_CONTROL, 0, _KEYEVENTF_KEYUP, 0)
+        if not _click_meet_camera_button(hwnd):
+            return
 
         time.sleep(0.2)
 
